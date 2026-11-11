@@ -1,0 +1,1045 @@
+
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Modelos 3D - Graficación</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #title {
+            position: fixed;
+            top: 22px;
+            left: 25px;
+            z-index: 5;
+            color: white;
+            font-size: 17px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-shadow: 0 0 12px #168cff;
+        }
+
+        #subtitle {
+            position: fixed;
+            top: 48px;
+            left: 25px;
+            z-index: 5;
+            color: #9bbbd9;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            padding: 15px 25px;
+            color: white;
+            background: rgba(10, 20, 35, 0.92);
+            border: 1px solid #168cff;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        #error {
+            display: none;
+            position: fixed;
+            bottom: 50px;
+            left: 20px;
+            right: 20px;
+            z-index: 30;
+            padding: 12px;
+            color: #ffbaba;
+            background: rgba(90, 0, 0, 0.9);
+            border-radius: 8px;
+        }
+
+        #instructions {
+            position: fixed;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            color: #a9c9e8;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .lil-gui {
+            --background-color: #101722;
+            --text-color: #e8f3ff;
+            --title-background-color: #142b46;
+            --widget-color: #1b3858;
+            --hover-color: #28517a;
+            --focus-color: #247cff;
+            --number-color: #70baff;
+            --string-color: #80d9ff;
+            --font-size: 11px;
+            --width: 280px;
+            z-index: 100 !important;
+        }
+    </style>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "../build/three.module.js",
+            "three/addons/": "./jsm/"
+        }
+    }
+    </script>
+</head>
+
+<body>
+
+    <div id="title">VISUALIZADOR DE MODELOS 3D</div>
+    <div id="subtitle">PROYECTO DE GRAFICACIÓN | THREE.JS</div>
+
+    <div id="loading">Cargando modelo 3D...</div>
+    <div id="error"></div>
+
+    <div id="instructions">
+        ARRASTRA PARA GIRAR · RUEDA PARA ACERCAR O ALEJAR
+    </div>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        // =========================================
+        // ELEMENTOS HTML
+        // =========================================
+
+        const loading = document.getElementById('loading');
+        const errorElement = document.getElementById('error');
+
+        // =========================================
+        // CONFIGURACIÓN DE LOS MODELOS
+        // =========================================
+
+        const modelSettings = {
+            'Running': {
+                color: '#168cff',
+                emissive: '#062b58',
+                metalness: 0.35,
+                roughness: 0.25,
+                shininess: 100,
+                specular: '#ffffff'
+            },
+
+            'Medium Hit To Head': {
+                color: '#ff8a24',
+                emissive: '#542000',
+                metalness: 0.15,
+                roughness: 0.22,
+                shininess: 85,
+                specular: '#fff0d5'
+            },
+
+            'Jumping': {
+                color: '#20d58a',
+                emissive: '#064b2d',
+                metalness: 0.55,
+                roughness: 0.28,
+                shininess: 110,
+                specular: '#ffffff'
+            },
+
+            'Flying Knee Punch Combo': {
+                color: '#a66aff',
+                emissive: '#30105c',
+                metalness: 0.45,
+                roughness: 0.2,
+                shininess: 120,
+                specular: '#ffffff'
+            },
+
+            'Illegal Elbow Punch': {
+                color: '#ff414f',
+                emissive: '#5a0710',
+                metalness: 0.35,
+                roughness: 0.25,
+                shininess: 100,
+                specular: '#ffffff'
+            }
+        };
+
+        const assets = Object.keys(modelSettings);
+
+        // =========================================
+        // ESTADO DEL VISOR
+        // =========================================
+
+        let currentModel = null;
+        let mixer = null;
+        let animationController = null;
+        let loadRequest = 0;
+        let baseModelHeight = 160;
+
+        const clock = new THREE.Clock();
+
+        const params = {
+            asset: 'Running',
+            animation: '',
+            scale: 160,
+            wireframe: false,
+            showGrid: true,
+            showPlatform: true,
+            topLight: 3.5,
+            fillLight: 2.2,
+            blueLight: 1800,
+            cyanLight: 1500,
+            exposure: 1.2,
+            color: '#168cff'
+        };
+
+        // =========================================
+        // ESCENA
+        // =========================================
+
+        const scene = new THREE.Scene();
+
+        scene.background = new THREE.Color(0x000000);
+
+        // =========================================
+        // CÁMARA
+        // =========================================
+
+        const camera = new THREE.PerspectiveCamera(
+            45,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            5000
+        );
+
+        camera.position.set(180, 180, 350);
+
+        // =========================================
+        // ILUMINACIÓN AMBIENTAL
+        // =========================================
+
+        const hemisphereLight = new THREE.HemisphereLight(
+            0xffffff,
+            0x151525,
+            2.2
+        );
+
+        scene.add(hemisphereLight);
+
+        const ambientLight = new THREE.AmbientLight(
+            0xffffff,
+            0.45
+        );
+
+        scene.add(ambientLight);
+
+        // =========================================
+        // LUZ SUPERIOR PRINCIPAL
+        // =========================================
+
+        const topLight = new THREE.DirectionalLight(
+            0xffffff,
+            params.topLight
+        );
+
+        topLight.position.set(100, 300, 180);
+        topLight.castShadow = true;
+
+        topLight.shadow.mapSize.width = 2048;
+        topLight.shadow.mapSize.height = 2048;
+
+        topLight.shadow.camera.left = -250;
+        topLight.shadow.camera.right = 250;
+        topLight.shadow.camera.top = 300;
+        topLight.shadow.camera.bottom = -100;
+
+        topLight.shadow.bias = -0.0005;
+
+        scene.add(topLight);
+
+        // =========================================
+        // LUZ LATERAL AZUL
+        // =========================================
+
+        const blueLight = new THREE.PointLight(
+            0x087fff,
+            params.blueLight,
+            700
+        );
+
+        blueLight.position.set(-180, 160, 100);
+
+        scene.add(blueLight);
+
+        // =========================================
+        // LUZ LATERAL CIAN
+        // =========================================
+
+        const cyanLight = new THREE.PointLight(
+            0x00e5ff,
+            params.cyanLight,
+            650
+        );
+
+        cyanLight.position.set(180, 180, -120);
+
+        scene.add(cyanLight);
+
+        // =========================================
+        // LUZ SUPERIOR TIPO REFLECTOR
+        // =========================================
+
+        const spotLight = new THREE.SpotLight(
+            0xffffff,
+            1800,
+            900,
+            Math.PI / 5,
+            0.45,
+            1
+        );
+
+        spotLight.position.set(0, 350, 50);
+        spotLight.target.position.set(0, 70, 0);
+
+        scene.add(spotLight);
+        scene.add(spotLight.target);
+
+        // =========================================
+        // SUELO
+        // =========================================
+
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(2000, 2000),
+            new THREE.MeshStandardMaterial({
+                color: 0x080b12,
+                roughness: 0.8,
+                metalness: 0.2
+            })
+        );
+
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -2;
+        ground.receiveShadow = true;
+
+        scene.add(ground);
+
+        // =========================================
+        // PLATAFORMA
+        // =========================================
+
+        const platform = new THREE.Mesh(
+            new THREE.CylinderGeometry(85, 90, 5, 64),
+            new THREE.MeshStandardMaterial({
+                color: 0x101c2b,
+                metalness: 0.75,
+                roughness: 0.3
+            })
+        );
+
+        platform.position.y = 1.5;
+        platform.receiveShadow = true;
+        platform.castShadow = true;
+
+        scene.add(platform);
+
+        // =========================================
+        // ANILLO LUMINOSO
+        // =========================================
+
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(86, 1.2, 8, 100),
+            new THREE.MeshBasicMaterial({
+                color: 0x087fff
+            })
+        );
+
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = 4.2;
+
+        scene.add(ring);
+
+        // =========================================
+        // CUADRÍCULA
+        // =========================================
+
+        const grid = new THREE.GridHelper(
+            2000,
+            60,
+            0x123d68,
+            0x101c2b
+        );
+
+        grid.position.y = -0.8;
+
+        scene.add(grid);
+
+        // =========================================
+        // RENDERIZADOR
+        // =========================================
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true
+        });
+
+        renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, 2)
+        );
+
+        renderer.setSize(
+            window.innerWidth,
+            window.innerHeight
+        );
+
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = params.exposure;
+
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        document.body.appendChild(renderer.domElement);
+
+        // =========================================
+        // CONTROLES DE CÁMARA
+        // =========================================
+
+        const controls = new OrbitControls(
+            camera,
+            renderer.domElement
+        );
+
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        controls.minDistance = 40;
+        controls.maxDistance = 1200;
+
+        controls.maxPolarAngle = Math.PI / 2;
+
+        controls.target.set(0, 80, 0);
+
+        // =========================================
+        // CARGADOR FBX
+        // =========================================
+
+        const loader = new FBXLoader();
+
+        // =========================================
+        // APLICAR MATERIAL Y COLOR
+        // =========================================
+
+        function applyMaterialSettings(model) {
+
+            const settings = modelSettings[params.asset];
+
+            if (!settings) return;
+
+            model.traverse(function (child) {
+
+                if (!child.isMesh) return;
+
+                child.castShadow = true;
+                child.receiveShadow = true;
+
+                const materials = Array.isArray(child.material)
+                    ? child.material
+                    : [child.material];
+
+                materials.forEach(function (material) {
+
+                    if (!material) return;
+
+                    if (material.color) {
+                        material.color.set(params.color);
+                    }
+
+                    if (material.specular) {
+                        material.specular.set(settings.specular);
+                    }
+
+                    if (material.emissive) {
+                        material.emissive.set(settings.emissive);
+                    }
+
+                    if ('emissiveIntensity' in material) {
+                        material.emissiveIntensity = 0.2;
+                    }
+
+                    if ('shininess' in material) {
+                        material.shininess = settings.shininess;
+                    }
+
+                    if ('roughness' in material) {
+                        material.roughness = settings.roughness;
+                    }
+
+                    if ('metalness' in material) {
+                        material.metalness = settings.metalness;
+                    }
+
+                    material.wireframe = params.wireframe;
+                    material.needsUpdate = true;
+
+                });
+
+            });
+
+        }
+
+        // =========================================
+        // POSICIÓN Y ESCALA DEL MODELO
+        // =========================================
+
+        function updateModelTransform() {
+
+            if (!currentModel) return;
+
+            currentModel.scale.setScalar(
+                params.scale / baseModelHeight
+            );
+
+            currentModel.position.set(0, 0, 0);
+
+            currentModel.updateMatrixWorld(true);
+
+            const box = new THREE.Box3().setFromObject(currentModel);
+
+            const center = new THREE.Vector3();
+
+            box.getCenter(center);
+
+            currentModel.position.x -= center.x;
+            currentModel.position.z -= center.z;
+            currentModel.position.y -= box.min.y;
+
+            currentModel.updateMatrixWorld(true);
+
+            const finalBox = new THREE.Box3()
+                .setFromObject(currentModel);
+
+            const finalSize = new THREE.Vector3();
+
+            finalBox.getSize(finalSize);
+
+            controls.target.set(
+                0,
+                finalSize.y / 2,
+                0
+            );
+
+            const maxDimension = Math.max(
+                finalSize.x,
+                finalSize.y,
+                finalSize.z
+            );
+
+            const distance = Math.max(
+                maxDimension * 2.2,
+                100
+            );
+
+            camera.position.set(
+                distance * 0.65,
+                finalSize.y * 0.95,
+                distance * 1.9
+            );
+
+            camera.near = 0.1;
+            camera.far = distance * 20;
+
+            camera.updateProjectionMatrix();
+            controls.update();
+
+            console.log('Dimensiones finales:', finalSize);
+
+        }
+
+        // =========================================
+        // CONTROL DE ANIMACIONES
+        // =========================================
+
+        function updateAnimationController() {
+
+            if (animationController) {
+                animationController.destroy();
+                animationController = null;
+            }
+
+            if (
+                !currentModel ||
+                !currentModel.animations ||
+                currentModel.animations.length === 0
+            ) {
+                params.animation = '';
+                return;
+            }
+
+            const animationNames = currentModel.animations.map(
+                (clip, index) => clip.name || `Animación ${index + 1}`
+            );
+
+            params.animation = animationNames[0];
+
+            animationController = animationFolder
+                .add(params, 'animation', animationNames)
+                .name('Animation')
+                .onChange(function (value) {
+
+                    const index = animationNames.indexOf(value);
+
+                    if (index >= 0 && mixer) {
+
+                        mixer.stopAllAction();
+
+                        const action = mixer.clipAction(
+                            currentModel.animations[index]
+                        );
+
+                        action.reset();
+                        action.setLoop(THREE.LoopRepeat);
+                        action.play();
+
+                    }
+
+                });
+
+        }
+
+        // =========================================
+        // CARGAR MODELO SELECCIONADO
+        // =========================================
+
+        function loadAsset(asset) {
+
+            const requestId = ++loadRequest;
+
+            loading.style.display = 'block';
+            loading.textContent = `Cargando ${asset}...`;
+
+            errorElement.style.display = 'none';
+
+            if (mixer) {
+                mixer.stopAllAction();
+                mixer = null;
+            }
+
+            if (currentModel) {
+
+                scene.remove(currentModel);
+
+                currentModel.traverse(function (child) {
+
+                    if (child.isMesh) {
+
+                        child.geometry.dispose();
+
+                        const materials = Array.isArray(child.material)
+                            ? child.material
+                            : [child.material];
+
+                        materials.forEach(function (material) {
+
+                            if (material) material.dispose();
+
+                        });
+
+                    }
+
+                });
+
+                currentModel = null;
+            }
+
+            if (animationController) {
+                animationController.destroy();
+                animationController = null;
+            }
+
+            loader.load(
+
+                'models/fbx/' + encodeURIComponent(asset) + '.fbx',
+
+                function (model) {
+
+                    // Evitar que una carga anterior reemplace la nueva
+                    if (requestId !== loadRequest) return;
+
+                    console.log('FBX cargado:', asset);
+
+                    model.updateMatrixWorld(true);
+
+                    let totalMeshes = 0;
+                    let totalVertices = 0;
+
+                    model.traverse(function (child) {
+
+                        if (child.isMesh) {
+
+                            totalMeshes++;
+
+                            if (
+                                child.geometry &&
+                                child.geometry.attributes.position
+                            ) {
+
+                                totalVertices +=
+                                    child.geometry.attributes.position.count;
+
+                            }
+
+                        }
+
+                    });
+
+                    console.log('Mallas:', totalMeshes);
+                    console.log('Vértices:', totalVertices);
+
+                    const originalBox = new THREE.Box3()
+                        .setFromObject(model);
+
+                    const originalSize = new THREE.Vector3();
+
+                    originalBox.getSize(originalSize);
+
+                    console.log('Tamaño original:', originalSize);
+
+                    if (
+                        totalMeshes === 0 ||
+                        totalVertices === 0 ||
+                        !Number.isFinite(originalSize.y) ||
+                        originalSize.y <= 0.001
+                    ) {
+
+                        loading.style.display = 'none';
+
+                        errorElement.style.display = 'block';
+
+                        errorElement.textContent =
+                            `El modelo ${asset} no contiene geometría válida.`;
+
+                        return;
+                    }
+
+                    currentModel = model;
+
+                    // Guardar altura original para ajustar escala
+                    baseModelHeight = originalSize.y;
+
+                    // Aplicar color y material del modelo
+                    params.color = modelSettings[asset].color;
+
+                    applyMaterialSettings(currentModel);
+
+                    // Añadir a la escena
+                    scene.add(currentModel);
+
+                    // Ajustar escala, posición y cámara
+                    params.scale = 160;
+
+                    updateModelTransform();
+
+                    // Activar animación
+                    mixer = new THREE.AnimationMixer(currentModel);
+
+                    if (
+                        currentModel.animations &&
+                        currentModel.animations.length > 0
+                    ) {
+
+                        const firstAction = mixer.clipAction(
+                            currentModel.animations[0]
+                        );
+
+                        firstAction.setLoop(THREE.LoopRepeat);
+                        firstAction.play();
+
+                        console.log(
+                            'Animación activada:',
+                            currentModel.animations[0].name
+                        );
+
+                    } else {
+
+                        console.warn(
+                            'Este modelo no contiene animaciones.'
+                        );
+
+                    }
+
+                    updateAnimationController();
+
+                    loading.style.display = 'none';
+
+                },
+
+                function (xhr) {
+
+                    if (requestId !== loadRequest) return;
+
+                    if (xhr.total > 0) {
+
+                        const progress =
+                            (xhr.loaded / xhr.total) * 100;
+
+                        loading.textContent =
+                            `Cargando ${asset}: ${progress.toFixed(0)}%`;
+
+                    }
+
+                },
+
+                function (error) {
+
+                    if (requestId !== loadRequest) return;
+
+                    console.error('Error FBX:', error);
+
+                    loading.style.display = 'none';
+                    errorElement.style.display = 'block';
+
+                    errorElement.textContent =
+                        `No se pudo cargar ${asset}. Comprueba el archivo y su nombre.`;
+
+                }
+
+            );
+
+        }
+
+        // =========================================
+        // PANEL ASSETS Y CONTROLS
+        // =========================================
+
+        const gui = new GUI({
+            title: 'CONTROLS',
+            width: 280
+        });
+
+        // Carpeta de modelos
+        const assetsFolder = gui.addFolder('Assets');
+
+        assetsFolder.add(
+            params,
+            'asset',
+            assets
+        )
+        .name('Select Model')
+        .onChange(function (value) {
+            loadAsset(value);
+        });
+
+        assetsFolder.open();
+
+        // Carpeta de animaciones
+        const animationFolder = gui.addFolder('Animation');
+
+        // Carpeta de apariencia
+        const appearanceFolder = gui.addFolder('Appearance');
+
+        appearanceFolder.add(
+            params,
+            'scale',
+            70,
+            260,
+            5
+        )
+        .name('Model Size')
+        .onChange(updateModelTransform);
+
+        appearanceFolder.addColor(
+            params,
+            'color'
+        )
+        .name('Model Color')
+        .onChange(function () {
+
+            if (currentModel) {
+                applyMaterialSettings(currentModel);
+            }
+
+        });
+
+        appearanceFolder.add(
+            params,
+            'wireframe'
+        )
+        .name('Wireframe')
+        .onChange(function () {
+
+            if (currentModel) {
+                applyMaterialSettings(currentModel);
+            }
+
+        });
+
+        // Carpeta de iluminación
+        const lightingFolder = gui.addFolder('Lighting');
+
+        lightingFolder.add(
+            params,
+            'topLight',
+            0,
+            8,
+            0.1
+        )
+        .name('Top Light')
+        .onChange(function (value) {
+            topLight.intensity = value;
+        });
+
+        lightingFolder.add(
+            params,
+            'fillLight',
+            0,
+            5,
+            0.1
+        )
+        .name('Ambient Light')
+        .onChange(function (value) {
+            hemisphereLight.intensity = value;
+        });
+
+        lightingFolder.add(
+            params,
+            'blueLight',
+            0,
+            3000,
+            50
+        )
+        .name('Blue Light')
+        .onChange(function (value) {
+            blueLight.intensity = value;
+        });
+
+        lightingFolder.add(
+            params,
+            'cyanLight',
+            0,
+            3000,
+            50
+        )
+        .name('Cyan Light')
+        .onChange(function (value) {
+            cyanLight.intensity = value;
+        });
+
+        lightingFolder.add(
+            params,
+            'exposure',
+            0.5,
+            2,
+            0.05
+        )
+        .name('Exposure')
+        .onChange(function (value) {
+            renderer.toneMappingExposure = value;
+        });
+
+        // Carpeta de escenario
+        const sceneFolder = gui.addFolder('Scene');
+
+        sceneFolder.add(
+            params,
+            'showGrid'
+        )
+        .name('Show Grid')
+        .onChange(function (value) {
+            grid.visible = value;
+        });
+
+        sceneFolder.add(
+            params,
+            'showPlatform'
+        )
+        .name('Show Platform')
+        .onChange(function (value) {
+
+            platform.visible = value;
+            ring.visible = value;
+
+        });
+
+        // Abrir carpetas principales
+        lightingFolder.open();
+
+        // =========================================
+        // CARGAR MODELO INICIAL
+        // =========================================
+
+        loadAsset('Running');
+
+        // =========================================
+        // ANIMACIÓN DE LA ESCENA
+        // =========================================
+
+        function animate() {
+
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(
+                clock.getDelta(),
+                0.05
+            );
+
+            if (mixer) {
+                mixer.update(delta);
+            }
+
+            controls.update();
+
+            renderer.render(scene, camera);
+
+        }
+
+        animate();
+
+        // =========================================
+        // AJUSTAR TAMAÑO DE VENTANA
+        // =========================================
+
+        window.addEventListener('resize', function () {
+
+            camera.aspect =
+                window.innerWidth / window.innerHeight;
+
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(
+                window.innerWidth,
+                window.innerHeight
+            );
+
+        });
+
+    </script>
+
+</body>
+
+</html>
